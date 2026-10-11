@@ -13,3 +13,4 @@ env/
 *.tmp
 .DS_Store
 Thumbs.db
+checkpoints/

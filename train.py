@@ -30,8 +30,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output",
         type=Path,
-        default=PROJECT_ROOT / "pthmnist_cnn.pth",
+        default=PROJECT_ROOT / "checkpoints" / "trained.pth",
         help="where to save the best state dictionary",
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="allow replacing an existing output checkpoint",
     )
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch-size", type=int, default=64)
@@ -52,8 +57,17 @@ def seed_everything(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
+def validate_output_path(output: Path, overwrite: bool) -> None:
+    if output.exists() and not overwrite:
+        raise FileExistsError(
+            f"refusing to replace existing checkpoint: {output}. "
+            "Pass --overwrite to replace it intentionally."
+        )
+
+
 def main() -> None:
     args = build_parser().parse_args()
+    validate_output_path(args.output, args.overwrite)
     from torchvision import transforms
 
     seed_everything(args.seed)
@@ -78,14 +92,15 @@ def main() -> None:
     )
 
     metadata = ChineseMNISTDataset(args.data)
-    train_indices, test_indices = writer_disjoint_split(
+    train_indices, validation_indices = writer_disjoint_split(
         metadata.records, train_ratio=0.8, seed=args.seed
     )
     training_data = Subset(
         ChineseMNISTDataset(args.data, transform=train_transform), train_indices
     )
-    test_data = Subset(
-        ChineseMNISTDataset(args.data, transform=evaluation_transform), test_indices
+    validation_data = Subset(
+        ChineseMNISTDataset(args.data, transform=evaluation_transform),
+        validation_indices,
     )
     generator = torch.Generator().manual_seed(args.seed)
     train_loader = DataLoader(
@@ -104,7 +119,7 @@ def main() -> None:
 
     print(
         f"Training on {len(training_data):,} images; evaluating on "
-        f"{len(test_data):,} writer-disjoint images ({device})."
+        f"{len(validation_data):,} writer-disjoint validation images ({device})."
     )
     for epoch in range(1, args.epochs + 1):
         model.train()
@@ -118,20 +133,20 @@ def main() -> None:
             optimizer.step()
             running_loss += loss.item()
 
-        evaluation = evaluate_model(
-            model, test_data, batch_size=args.batch_size, device=device
+        validation = evaluate_model(
+            model, validation_data, batch_size=args.batch_size, device=device
         )
         average_loss = running_loss / len(train_loader)
         print(
             f"Epoch {epoch:02d}/{args.epochs}: loss={average_loss:.4f}, "
-            f"writer-disjoint accuracy={evaluation.accuracy:.2f}%"
+            f"writer-disjoint validation accuracy={validation.accuracy:.2f}%"
         )
-        if evaluation.accuracy > best_accuracy:
-            best_accuracy = evaluation.accuracy
+        if validation.accuracy > best_accuracy:
+            best_accuracy = validation.accuracy
             args.output.parent.mkdir(parents=True, exist_ok=True)
             torch.save(model.state_dict(), args.output)
 
-    print(f"Best checkpoint: {best_accuracy:.2f}% -> {args.output}")
+    print(f"Best validation checkpoint: {best_accuracy:.2f}% -> {args.output}")
 
 
 if __name__ == "__main__":

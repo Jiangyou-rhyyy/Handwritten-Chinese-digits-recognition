@@ -6,7 +6,7 @@ from pathlib import Path
 import torch
 
 from chinese_digits.data import ChineseMNISTDataset
-from chinese_digits.evaluation import evaluate_model
+from chinese_digits.evaluation import ClassResult, evaluate_model
 from chinese_digits.inference import preprocess_image
 from chinese_digits.model import CLASS_NAMES, CLASS_VALUES, load_model
 
@@ -52,7 +52,7 @@ def main() -> None:
     print("\nClass     Value       Correct     Accuracy")
     print("-" * 47)
     for index, character in enumerate(CLASS_NAMES):
-        class_result = result.per_class[index]
+        class_result = result.per_class.get(index, ClassResult(correct=0, total=0))
         print(
             f"{character:<9} {CLASS_VALUES[index]:>9,}     "
             f"{class_result.correct:>4}/{class_result.total:<4}     "

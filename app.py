@@ -1,6 +1,7 @@
 """Desktop drawing pad for handwritten Chinese digit recognition."""
 
 import argparse
+import math
 from pathlib import Path
 import tkinter as tk
 
@@ -12,6 +13,20 @@ from chinese_digits.model import load_model
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+
+
+def interpolate_points(start, end, max_step: float = 5.0):
+    """Return evenly spaced points so a fast pointer still draws a solid stroke."""
+
+    distance = math.hypot(end[0] - start[0], end[1] - start[1])
+    segments = max(1, math.ceil(distance / max_step))
+    return [
+        (
+            round(start[0] + (end[0] - start[0]) * index / segments),
+            round(start[1] + (end[1] - start[1]) * index / segments),
+        )
+        for index in range(segments + 1)
+    ]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,14 +53,14 @@ class DrawingApp(tk.Tk):
         self.model = model
         self.device = device
         self.title("Chinese Digit Recognition")
-        self.geometry("420x540")
+        self.geometry("520x660")
         self.resizable(False, False)
         self.configure(bg="#0f172a")
 
         tk.Label(
             self,
             text="Handwritten Chinese Digits",
-            font=("Segoe UI", 20, "bold"),
+            font=("Segoe UI", 14, "bold"),
             fg="#f8fafc",
             bg="#0f172a",
         ).pack(pady=(22, 4))
@@ -55,6 +70,7 @@ class DrawingApp(tk.Tk):
             font=("Segoe UI", 10),
             fg="#94a3b8",
             bg="#0f172a",
+            wraplength=440,
         ).pack(pady=(0, 16))
 
         self.canvas = tk.Canvas(
@@ -68,7 +84,10 @@ class DrawingApp(tk.Tk):
         self.canvas.pack()
         self.image = Image.new("L", (320, 320), color=255)
         self.drawer = ImageDraw.Draw(self.image)
+        self.last_point = None
+        self.canvas.bind("<Button-1>", self.begin_stroke)
         self.canvas.bind("<B1-Motion>", self.paint)
+        self.canvas.bind("<ButtonRelease-1>", self.end_stroke)
 
         button_frame = tk.Frame(self, bg="#0f172a")
         button_frame.pack(pady=16)
@@ -104,20 +123,37 @@ class DrawingApp(tk.Tk):
         )
         self.result_label.pack()
 
-    def paint(self, event) -> None:
+    def draw_point(self, x: int, y: int) -> None:
         radius = 11
         bounds = (
-            event.x - radius,
-            event.y - radius,
-            event.x + radius,
-            event.y + radius,
+            x - radius,
+            y - radius,
+            x + radius,
+            y + radius,
         )
         self.canvas.create_oval(*bounds, fill="black", outline="black")
         self.drawer.ellipse(bounds, fill=0)
 
+    def begin_stroke(self, event) -> None:
+        self.last_point = (event.x, event.y)
+        self.draw_point(event.x, event.y)
+
+    def paint(self, event) -> None:
+        current_point = (event.x, event.y)
+        if self.last_point is None:
+            self.begin_stroke(event)
+            return
+        for x, y in interpolate_points(self.last_point, current_point)[1:]:
+            self.draw_point(x, y)
+        self.last_point = current_point
+
+    def end_stroke(self, _event) -> None:
+        self.last_point = None
+
     def clear(self) -> None:
         self.canvas.delete("all")
         self.drawer.rectangle((0, 0, 320, 320), fill=255)
+        self.last_point = None
         self.result_label.configure(text="Ready", fg="#e2e8f0")
 
     def recognize(self) -> None:
